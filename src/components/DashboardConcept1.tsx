@@ -77,47 +77,59 @@ const DashboardConcept1 = ({ onLogout }: { onLogout: () => void }) => {
 
   // Initialize dashboard data from multiple sources with caching
   useEffect(() => {
+    let isMounted = true;
+    
     const initializeDashboardData = async () => {
-      if (user?.email && !dashboardData) { // Only fetch if we don't have data
+      if (user?.email && !dashboardData && !isLoadingData) { // Only fetch if we don't have data and not already loading
         try {
           setIsLoadingData(true);
           const response = await api.get(`/dashboard-data/${encodeURIComponent(user.email)}`);
-          setDashboardData(response.data);
+          if (isMounted) {
+            setDashboardData(response.data);
+          }
         } catch (error) {
           console.error('Error initializing dashboard data:', error);
-          // Set default data to prevent infinite loading
-          setDashboardData({
-            userProfile: {
-              propFirm: 'Not Set',
-              accountType: 'Not Set',
-              accountSize: 'Not Set',
-              experience: 'Not Set',
-              tradesPerDay: 'Not Set',
-              riskPerTrade: 'Not Set',
-              riskReward: '1:Not Set',
-              session: 'Not Set'
-            },
-            performance: {
-              accountBalance: 0,
-              winRate: 0,
-              totalTrades: 0,
-              totalPnL: 0
-            }
-          });
+          if (isMounted) {
+            // Set default data to prevent infinite loading
+            setDashboardData({
+              userProfile: {
+                propFirm: 'Not Set',
+                accountType: 'Not Set',
+                accountSize: 'Not Set',
+                experience: 'Not Set',
+                tradesPerDay: 'Not Set',
+                riskPerTrade: 'Not Set',
+                riskReward: '1:Not Set',
+                session: 'Not Set'
+              },
+              performance: {
+                accountBalance: 0,
+                winRate: 0,
+                totalTrades: 0,
+                totalPnL: 0
+              }
+            });
+          }
         } finally {
-          setIsLoadingData(false);
+          if (isMounted) {
+            setIsLoadingData(false);
+          }
         }
       }
     };
 
     initializeDashboardData();
-  }, [user?.email, dashboardData]);
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.email]); // Removed dashboardData dependency to prevent infinite loop
 
-  // Update current time every minute instead of every second to reduce flickering
+  // Update current time every 5 minutes to reduce flickering
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-    }, 60000); // Update every minute instead of every second
+    }, 300000); // Update every 5 minutes instead of every minute
     return () => clearInterval(timer);
   }, []);
 
@@ -125,14 +137,24 @@ const DashboardConcept1 = ({ onLogout }: { onLogout: () => void }) => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       const status = getMarketStatus(selectedTimezone);
-      setMarketStatus(status);
-    }, 100); // Debounce to prevent rapid updates
+      setMarketStatus((prevStatus: any) => {
+        // Only update if status actually changed
+        if (!prevStatus || 
+            prevStatus.isOpen !== status.isOpen || 
+            prevStatus.currentSession !== status.currentSession) {
+          return status;
+        }
+        return prevStatus;
+      });
+    }, 500); // Increased debounce time
     
     return () => clearTimeout(timeoutId);
   }, [selectedTimezone, currentTime]);
 
   // Fetch Forex Factory news with better caching
   useEffect(() => {
+    let isMounted = true;
+    
     const fetchNews = async () => {
       // Only fetch if not already loading
       if (isLoadingNews) return;
@@ -140,25 +162,30 @@ const DashboardConcept1 = ({ onLogout }: { onLogout: () => void }) => {
       setIsLoadingNews(true);
       try {
         const news = await fetchForexFactoryNews(selectedNewsDate, selectedCurrency, selectedTimezone);
-        setForexNews(news);
+        if (isMounted) {
+          setForexNews(news);
+        }
       } catch (error) {
         console.error('Error fetching Forex Factory news:', error);
       } finally {
-        setIsLoadingNews(false);
+        if (isMounted) {
+          setIsLoadingNews(false);
+        }
       }
     };
 
     // Debounce the fetch to prevent rapid calls
-    const timeoutId = setTimeout(fetchNews, 500);
+    const timeoutId = setTimeout(fetchNews, 1000); // Increased debounce
     
-    // Refresh news every 30 minutes
-    const newsInterval = setInterval(fetchNews, 30 * 60 * 1000);
+    // Refresh news every 60 minutes instead of 30
+    const newsInterval = setInterval(fetchNews, 60 * 60 * 1000);
     
     return () => {
+      isMounted = false;
       clearTimeout(timeoutId);
       clearInterval(newsInterval);
     };
-  }, [selectedNewsDate, selectedCurrency, selectedTimezone, isLoadingNews]);
+  }, [selectedNewsDate, selectedCurrency, selectedTimezone]); // Removed isLoadingNews dependency
 
   const handleNewsDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedNewsDate(new Date(e.target.value));
@@ -285,28 +312,37 @@ const DashboardConcept1 = ({ onLogout }: { onLogout: () => void }) => {
     initState();
   }, [user?.email, dashboardData]);
 
-  // Save trading state to localStorage whenever it changes
+  // Save trading state to localStorage whenever it changes (debounced)
   useEffect(() => {
     if (tradingState && user?.email) {
-      const stateKey = `trading_state_${user.email}`;
-      localStorage.setItem(stateKey, JSON.stringify(tradingState));
-      
-      // Also update dashboard data performance metrics
-      if (dashboardData) {
-        const updatedDashboardData = {
-          ...dashboardData,
-          performance: {
-            ...dashboardData.performance,
-            accountBalance: tradingState.currentEquity,
-            winRate: tradingState.performanceMetrics.winRate,
-            totalTrades: tradingState.performanceMetrics.totalTrades,
-            totalPnL: tradingState.performanceMetrics.totalPnl
+      const timeoutId = setTimeout(() => {
+        const stateKey = `trading_state_${user.email}`;
+        localStorage.setItem(stateKey, JSON.stringify(tradingState));
+        
+        // Also update dashboard data performance metrics (only if significantly changed)
+        if (dashboardData) {
+          const currentBalance = dashboardData.performance?.accountBalance || 0;
+          const newBalance = tradingState.currentEquity;
+          
+          // Only update if balance changed by more than $1 to prevent constant re-renders
+          if (Math.abs(currentBalance - newBalance) > 1) {
+            setDashboardData((prevData: any) => ({
+              ...prevData,
+              performance: {
+                ...prevData.performance,
+                accountBalance: tradingState.currentEquity,
+                winRate: tradingState.performanceMetrics.winRate,
+                totalTrades: tradingState.performanceMetrics.totalTrades,
+                totalPnL: tradingState.performanceMetrics.totalPnl
+              }
+            }));
           }
-        };
-        setDashboardData(updatedDashboardData);
-      }
+        }
+      }, 1000); // Debounce by 1 second
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [tradingState, user?.email]);
+  }, [tradingState, user?.email, dashboardData?.performance?.accountBalance]);
 
   if (isLoadingData) {
     return (

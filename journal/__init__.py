@@ -14,7 +14,20 @@ from dotenv import load_dotenv
 def create_app(config_object='journal.config.DevelopmentConfig'):
     load_dotenv()
     app = Flask(__name__, static_folder='../dist', static_url_path='')
-    app.config.from_object(config_object)
+    
+    try:
+        app.config.from_object(config_object)
+    except ImportError:
+        print(f"Error: Configuration object '{config_object}' not found.")
+        sys.exit(1)
+
+    # Validate DATABASE_URL
+    db_url = app.config.get('SQLALCHEMY_DATABASE_URI')
+    if not db_url:
+        print("Error: SQLALCHEMY_DATABASE_URI is not set.")
+        sys.exit(1)
+    
+    print(f"Database URL: {db_url}")
 
     # Initialize extensions
     db.init_app(app)

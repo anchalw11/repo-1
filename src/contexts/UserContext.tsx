@@ -57,7 +57,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         }
         
         // Set up API authorization
-        if (token && !token.startsWith('demo-token')) {
+        if (token && typeof token === 'string' && !token.startsWith('demo-token')) {
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         }
         
@@ -104,7 +104,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     let name = userData.name;
     
     // Only decode JWT if it's not a demo token
-    if (!token.startsWith('demo-token')) {
+    if (token && typeof token === 'string' && !token.startsWith('demo-token')) {
       try {
         const decodedToken = JSON.parse(atob(token.split('.')[1]));
         plan = decodedToken.plan_type || 'professional';
@@ -134,7 +134,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('access_token', token);
     
     // Only set API auth for real tokens
-    if (!token.startsWith('demo-token')) {
+    if (token && typeof token === 'string' && !token.startsWith('demo-token')) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
     
